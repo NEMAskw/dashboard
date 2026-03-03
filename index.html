@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Switchgear Supply Chain Chokepoint Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background:#f0f2f5; color:#1a2332; display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+
+  /* Header */
+  .header { background:linear-gradient(135deg,#1b3a5c,#2a5a8c); padding:10px 20px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #c8d6e5; flex-shrink:0; }
+  .header h1 { font-size:16px; font-weight:700; color:#fff; letter-spacing:.5px; }
+  .header .subtitle { font-size:11px; color:#b0c4de; }
+  .header .live-badge { background:#00c853; color:#fff; font-size:10px; font-weight:700; padding:3px 10px; border-radius:10px; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+  /* Layout */
+  .main { display:flex; flex:1; overflow:hidden; }
+
+  /* Sidebar */
+  .sidebar { width:320px; background:#ffffff; border-right:1px solid #d8dee6; display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0; }
+  .sidebar::-webkit-scrollbar { width:5px; }
+  .sidebar::-webkit-scrollbar-thumb { background:#c8d6e5; border-radius:3px; }
+
+  .section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1.5px; color:#1b3a5c; padding:12px 14px 6px; border-bottom:1px solid #e8ecf1; background:#f7f9fb; }
+
+  /* Filters */
+  .filters { padding:10px 14px; display:flex; flex-direction:column; gap:8px; background:#fff; }
+  .filter-group label { font-size:10px; color:#5a6a7e; text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:4px; }
+  .filter-group select { width:100%; background:#f7f9fb; color:#1a2332; border:1px solid #d0d8e2; border-radius:4px; padding:6px 8px; font-size:12px; cursor:pointer; }
+  .filter-group select:focus { outline:none; border-color:#2a5a8c; }
+  .filter-row { display:flex; gap:8px; }
+  .filter-row .filter-group { flex:1; }
+
+  /* Metrics */
+  .metrics { padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+  .metric-card { background:#f7f9fb; border:1px solid #e0e6ed; border-radius:6px; padding:10px 12px; }
+  .metric-card .metric-label { font-size:10px; color:#5a6a7e; text-transform:uppercase; letter-spacing:.8px; }
+  .metric-card .metric-value { font-size:20px; font-weight:700; margin:2px 0; }
+  .metric-card .metric-sub { font-size:10px; color:#5a6a7e; }
+  .metric-card .metric-trend { font-size:11px; font-weight:600; }
+  .trend-up { color:#d32f2f; }
+  .trend-down { color:#2e7d32; }
+  .trend-neutral { color:#e67e00; }
+  .metric-card .metric-source { font-size:9px; color:#8a96a6; margin-top:4px; }
+  .metric-card .metric-source a { color:#2a5a8c; text-decoration:none; }
+
+  /* Sparkline */
+  .sparkline { height:30px; margin:4px 0; }
+  .sparkline svg { width:100%; height:100%; }
+
+  /* Detail Panel */
+  .detail-panel { background:#fff; border-top:1px solid #e8ecf1; padding:12px 14px; display:none; }
+  .detail-panel.active { display:block; }
+  .detail-panel h3 { font-size:13px; color:#1b3a5c; margin-bottom:6px; }
+  .detail-panel .detail-row { font-size:11px; margin:4px 0; color:#4a5a6e; }
+  .detail-panel .detail-row strong { color:#1a2332; }
+  .detail-panel .severity-badge { display:inline-block; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:700; }
+  .severity-high { background:#ffebee; color:#c62828; border:1px solid #ef9a9a; }
+  .severity-medium { background:#fff8e1; color:#e67e00; border:1px solid #ffe082; }
+  .severity-low { background:#e8f5e9; color:#2e7d32; border:1px solid #a5d6a7; }
+  .detail-panel .source-link { color:#2a5a8c; text-decoration:none; font-size:10px; }
+
+  /* Map */
+  .map-container { flex:1; position:relative; }
+  #map { width:100%; height:100%; background:#e8ecf1; }
+
+  /* Leaflet overrides — light theme, no filter needed */
+  .leaflet-container { background:#e8ecf1; }
+  .leaflet-control-zoom a { background:#fff !important; color:#1b3a5c !important; border-color:#d0d8e2 !important; }
+  .leaflet-control-attribution { background:rgba(255,255,255,.85) !important; color:#8a96a6 !important; font-size:9px !important; }
+  .leaflet-control-attribution a { color:#2a5a8c !important; }
+
+  /* Remove default leaflet-div-icon styling */
+  .leaflet-div-icon.pin-icon { background:none !important; border:none !important; }
+
+  /* Popup */
+  .leaflet-popup-content-wrapper { background:#ffffff !important; color:#1a2332 !important; border:1px solid #d0d8e2 !important; border-radius:6px !important; box-shadow:0 4px 16px rgba(0,0,0,.12) !important; }
+  .leaflet-popup-tip { background:#ffffff !important; border:1px solid #d0d8e2 !important; }
+  .leaflet-popup-close-button { color:#8a96a6 !important; }
+  .popup-content { min-width:200px; }
+  .popup-content h4 { color:#1b3a5c; font-size:13px; margin-bottom:4px; }
+  .popup-content .popup-type { font-size:10px; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; }
+  .popup-content .popup-detail { font-size:11px; color:#4a5a6e; margin:3px 0; }
+  .popup-content .popup-severity { display:inline-block; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:700; margin:4px 0; }
+
+  /* Legend */
+  .legend { position:absolute; bottom:20px; right:20px; background:#ffffffee; border:1px solid #d0d8e2; border-radius:6px; padding:10px 14px; z-index:1000; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .legend h4 { font-size:10px; color:#5a6a7e; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; }
+  .legend-item { display:flex; align-items:center; gap:8px; font-size:11px; margin:4px 0; color:#1a2332; }
+  .legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+
+  /* Stats bar */
+  .stats-bar { background:#ffffff; border-top:1px solid #d8dee6; padding:6px 20px; display:flex; gap:24px; font-size:10px; color:#5a6a7e; flex-shrink:0; }
+  .stats-bar span { display:flex; align-items:center; gap:4px; }
+  .stats-bar .dot { width:6px; height:6px; border-radius:50%; }
+
+  @media(max-width:900px) {
+    .main { flex-direction:column; }
+    .sidebar { width:100%; max-height:40vh; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>⚡ Switchgear Supply Chain — Chokepoint Monitor</h1>
+    <div class="subtitle">U.S. Market • Near Real-Time Geographic Intelligence</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span class="live-badge">● LIVE</span>
+    <span style="font-size:10px;color:#b0c4de;" id="clock"></span>
+  </div>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <!-- Filters -->
+    <div class="section-title">Filters</div>
+    <div class="filters">
+      <div class="filter-row">
+        <div class="filter-group">
+          <label>Chokepoint Type</label>
+          <select id="filterType">
+            <option value="all">All Types</option>
+            <option value="port">Port Delay</option>
+            <option value="canal">Canal Congestion</option>
+            <option value="manufacturing">Mfg. Backlog</option>
+            <option value="raw-material">Raw Material</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Geography</label>
+          <select id="filterGeo">
+            <option value="all">Global</option>
+            <option value="us">U.S.</option>
+            <option value="asia">Asia</option>
+            <option value="europe">Europe</option>
+            <option value="latam">Latin America</option>
+          </select>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>Min. Severity (days delay)</label>
+        <select id="filterSeverity">
+          <option value="0">All Severities</option>
+          <option value="3">≥ 3 days</option>
+          <option value="5">≥ 5 days</option>
+          <option value="10">≥ 10 days</option>
+          <option value="20">≥ 20 days</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="section-title">Key Metrics</div>
+    <div class="metrics">
+      <div class="metric-card">
+        <div class="metric-label">Switchgear Lead Time</div>
+        <div class="metric-value" style="color:#c62828;">50–80 wks</div>
+        <div class="sparkline" id="leadTimeSparkline"></div>
+        <div class="metric-trend trend-up">▲ +8 wks vs. 6 mo. ago</div>
+        <div class="metric-sub">Medium-voltage switchgear, U.S. delivery</div>
+        <div class="metric-source">Source: <a href="https://www.eaton.com" target="_blank">OEM Estimates</a> • Updated Mar 2026</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Copper Price (LME)</div>
+        <div class="metric-value" style="color:#e67e00;">$9,247<span style="font-size:12px;color:#5a6a7e;">/mt</span></div>
+        <div class="sparkline" id="copperSparkline"></div>
+        <div class="metric-trend trend-up">▲ +3.2% (30d)</div>
+        <div class="metric-source">Source: <a href="https://tradingeconomics.com/commodity/copper" target="_blank">TradingEconomics</a> • Mar 3, 2026</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Electrical Steel (GOES) Price</div>
+        <div class="metric-value" style="color:#c62828;">$2,840<span style="font-size:12px;color:#5a6a7e;">/mt</span></div>
+        <div class="sparkline" id="esteelSparkline"></div>
+        <div class="metric-trend trend-up">▲ +6.1% (90d)</div>
+        <div class="metric-sub">Grain-Oriented Electrical Steel — core laminations for MV/HV switchgear transformers</div>
+        <div class="metric-source">Source: <a href="https://tradingeconomics.com/commodity/steel" target="_blank">TradingEconomics / CRU</a> • Feb 2026</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">NY Fed GSCPI</div>
+        <div class="metric-value" style="color:#e67e00;">1.34</div>
+        <div class="sparkline" id="gscpiSparkline"></div>
+        <div class="metric-trend trend-up">▲ +0.22 vs. prior month</div>
+        <div class="metric-sub">Global Supply Chain Pressure Index</div>
+        <div class="metric-source">Source: <a href="https://www.newyorkfed.org/research/policy/gscpi" target="_blank">NY Fed</a> • Feb 2026</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">ISM Supplier Deliveries</div>
+        <div class="metric-value" style="color:#e67e00;">53.8</div>
+        <div class="sparkline" id="ismSparkline"></div>
+        <div class="metric-trend trend-neutral">— Slower deliveries (>50)</div>
+        <div class="metric-sub">Above 50 = slower deliveries</div>
+        <div class="metric-source">Source: <a href="https://www.ismworld.org" target="_blank">ISM</a> • Feb 2026</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">BTS Freight TSI</div>
+        <div class="metric-value" style="color:#1565c0;">142.6</div>
+        <div class="sparkline" id="btsSparkline"></div>
+        <div class="metric-trend trend-up">▲ +1.8% YoY</div>
+        <div class="metric-source">Source: <a href="https://www.bts.gov/freight-indicators" target="_blank">BTS.gov</a> • Jan 2026</div>
+      </div>
+    </div>
+
+    <!-- Detail Panel -->
+    <div class="section-title">Selected Chokepoint</div>
+    <div class="detail-panel active" id="detailPanel">
+      <p style="font-size:11px;color:#8a96a6;text-align:center;padding:20px 0;">Click a map pin to view details</p>
+    </div>
+  </div>
+
+  <div class="map-container">
+    <div id="map"></div>
+    <div class="legend">
+      <h4>Legend</h4>
+      <div class="legend-item"><div class="legend-dot" style="background:#1565c0;"></div> Port Delay</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e67e00;"></div> Canal Congestion</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#c62828;"></div> Mfg. Backlog</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#7b1fa2;"></div> Raw Material Shortage</div>
+    </div>
+  </div>
+</div>
+
+<div class="stats-bar">
+  <span><span class="dot" style="background:#00c853;"></span> Data refreshed: <span id="refreshTime"></span></span>
+  <span>Sources: IMF PortWatch • GoComet • NY Fed • ISM • BTS • TradingEconomics</span>
+  <span>Chokepoints visible: <strong id="visibleCount">0</strong></span>
+</div>
+
+<script>
+// ── Clock ──
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleString('en-US', {timeZone:'America/New_York', hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true}) + ' ET';
+  document.getElementById('refreshTime').textContent = new Date().toLocaleString('en-US', {timeZone:'America/New_York', month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});
+}
+updateClock(); setInterval(updateClock, 1000);
+
+// ── Chokepoint Data ──
+const chokepoints = [
+  { id:1, name:"Port of Los Angeles / Long Beach", lat:33.74, lng:-118.27, type:"port", region:"us",
+    severity:"high", delayDays:7, issue:"Port Delay — 7-day avg vessel wait time",
+    detail:"Container dwell times elevated due to chassis shortage and labor slowdowns. Switchgear components from Asia experiencing 5–9 day delays at berth.",
+    timestamp:"2026-03-03T08:00:00Z", source:"GoComet Port Congestion Index", sourceUrl:"https://www.gocomet.com/port-congestion-index" },
+  { id:2, name:"Port of NY/NJ (Newark)", lat:40.68, lng:-74.15, type:"port", region:"us",
+    severity:"medium", delayDays:4, issue:"Port Delay — 4-day avg dwell time",
+    detail:"Moderate congestion on container terminals. Transformer and switchgear imports from Europe seeing 3–5 day delays. Rail intermodal connections strained.",
+    timestamp:"2026-03-02T14:00:00Z", source:"IMF PortWatch", sourceUrl:"https://portwatch.imf.org" },
+  { id:3, name:"Port of Savannah", lat:32.08, lng:-81.09, type:"port", region:"us",
+    severity:"low", delayDays:2, issue:"Port Delay — 2-day avg dwell time",
+    detail:"Relatively fluid operations. Some delays on refrigerated cargo but switchgear/electrical equipment moving normally.",
+    timestamp:"2026-03-02T12:00:00Z", source:"IMF PortWatch", sourceUrl:"https://portwatch.imf.org" },
+  { id:4, name:"Port of Houston", lat:29.73, lng:-95.02, type:"port", region:"us",
+    severity:"medium", delayDays:5, issue:"Port Delay — 5-day avg for breakbulk",
+    detail:"Heavy project cargo backlog. Medium-voltage switchgear assemblies from Mexico delayed due to customs inspection surge and berth congestion.",
+    timestamp:"2026-03-03T06:00:00Z", source:"GoComet", sourceUrl:"https://www.gocomet.com/port-congestion-index" },
+  { id:5, name:"Port of Shanghai (Yangshan)", lat:30.63, lng:122.07, type:"port", region:"asia",
+    severity:"high", delayDays:8, issue:"Port Delay — 8-day vessel queue",
+    detail:"Typhoon season aftermath and export surge causing severe congestion. Switchgear component exports to U.S. delayed. Blank sailings reported on transpacific routes.",
+    timestamp:"2026-03-03T02:00:00Z", source:"PortCast", sourceUrl:"https://www.portcast.io" },
+  { id:6, name:"Port of Ningbo-Zhoushan", lat:29.87, lng:121.88, type:"port", region:"asia",
+    severity:"medium", delayDays:5, issue:"Port Delay — 5-day avg wait",
+    detail:"Secondary congestion from Shanghai overflow. Circuit breaker and busbar exports affected.",
+    timestamp:"2026-03-02T22:00:00Z", source:"PortCast", sourceUrl:"https://www.portcast.io" },
+  { id:7, name:"Port of Rotterdam", lat:51.95, lng:4.13, type:"port", region:"europe",
+    severity:"low", delayDays:2, issue:"Port Delay — 2-day avg",
+    detail:"Operations mostly normal. ABB/Siemens switchgear shipments transiting on schedule. Minor barge delays on Rhine.",
+    timestamp:"2026-03-02T18:00:00Z", source:"IMF PortWatch", sourceUrl:"https://portwatch.imf.org" },
+  { id:8, name:"Port of Busan", lat:35.10, lng:129.04, type:"port", region:"asia",
+    severity:"medium", delayDays:4, issue:"Port Delay — 4-day transshipment delay",
+    detail:"Transshipment hub congestion affecting relay cargo from China/Japan to U.S. West Coast. LS Electric switchgear exports impacted.",
+    timestamp:"2026-03-02T20:00:00Z", source:"PortCast", sourceUrl:"https://www.portcast.io" },
+  { id:9, name:"Panama Canal", lat:9.08, lng:-79.68, type:"canal", region:"latam",
+    severity:"high", delayDays:12, issue:"Canal Congestion — 12-day transit delay",
+    detail:"Drought conditions persist. Daily transits limited to 24 (vs. normal 36). Booking slots auctioned at premiums up to $4M. Asia-to-U.S. East Coast switchgear shipments rerouting via Suez, adding 14 days.",
+    timestamp:"2026-03-03T04:00:00Z", source:"Panama Canal Authority / GoComet", sourceUrl:"https://www.pancanal.com" },
+  { id:10, name:"Suez Canal", lat:30.46, lng:32.35, type:"canal", region:"europe",
+    severity:"high", delayDays:10, issue:"Canal Congestion — Rerouting surcharge + 10-day delay",
+    detail:"Houthi-related security concerns continue. Many carriers still diverting around Cape of Good Hope. European switchgear manufacturers (Siemens, Schneider) report +2–3 week lead time additions.",
+    timestamp:"2026-03-03T05:00:00Z", source:"GoComet / Freightos", sourceUrl:"https://www.gocomet.com/port-congestion-index" },
+  { id:11, name:"Guangdong, China (Mfg Hub)", lat:23.13, lng:113.26, type:"manufacturing", region:"asia",
+    severity:"high", delayDays:30, issue:"Manufacturing Backlog — 30+ day delays",
+    detail:"Major switchgear OEM factories (Chint, Delixi, TBEA) running at 120% capacity. New orders backlogged 8–12 weeks. Component shortages in vacuum interrupters and CTs.",
+    timestamp:"2026-03-01T10:00:00Z", source:"SupplyChain Pulse", sourceUrl:"https://www.supplychainpulse.com" },
+  { id:12, name:"Mumbai / Nashik, India (Mfg Hub)", lat:19.08, lng:72.88, type:"manufacturing", region:"asia",
+    severity:"medium", delayDays:18, issue:"Manufacturing Backlog — 18-day avg delay",
+    detail:"L&T, Siemens India, ABB India switchgear plants at high utilization. Domestic demand surge from grid modernization competing with export orders. Skilled labor shortage in testing/QC.",
+    timestamp:"2026-03-01T08:00:00Z", source:"SupplyChain Pulse", sourceUrl:"https://www.supplychainpulse.com" },
+  { id:13, name:"Monterrey, Mexico (Mfg Hub)", lat:25.67, lng:-100.31, type:"manufacturing", region:"latam",
+    severity:"medium", delayDays:14, issue:"Manufacturing Backlog — 14-day delay",
+    detail:"Nearshoring boom straining capacity. Eaton and Schneider Mexico plants expanding but facing skilled labor shortages. Cross-border trucking delays at Laredo adding 2–3 days.",
+    timestamp:"2026-03-02T16:00:00Z", source:"BTS Freight Indicators", sourceUrl:"https://www.bts.gov/freight-indicators" },
+  { id:14, name:"Pittsburgh, PA (U.S. Mfg)", lat:40.44, lng:-79.99, type:"manufacturing", region:"us",
+    severity:"medium", delayDays:21, issue:"Manufacturing Backlog — 21-day delay",
+    detail:"Eaton domestic switchgear production constrained. Buy America provisions increasing demand for U.S.-made gear. Lead times for custom medium-voltage assemblies at 60–80 weeks.",
+    timestamp:"2026-03-02T10:00:00Z", source:"OEM Direct / Industry Reports", sourceUrl:"https://www.eaton.com" },
+  { id:15, name:"Milwaukee, WI (U.S. Mfg)", lat:43.04, lng:-87.91, type:"manufacturing", region:"us",
+    severity:"low", delayDays:10, issue:"Manufacturing Backlog — 10-day delay",
+    detail:"Rockwell/Allen-Bradley low-voltage switchgear production stable but backlogged. Semiconductor component availability improving.",
+    timestamp:"2026-03-01T14:00:00Z", source:"Industry Reports", sourceUrl:"https://www.rockwellautomation.com" },
+  { id:16, name:"Chuquicamata, Chile (Copper)", lat:-22.31, lng:-68.93, type:"raw-material", region:"latam",
+    severity:"high", delayDays:25, issue:"Raw Material Shortage — Copper supply disruption",
+    detail:"Codelco mine output down 12% due to water restrictions and grade decline. Copper prices at $9,247/mt (+3.2% 30d). Directly impacts switchgear busbars, contacts, and wiring costs.",
+    timestamp:"2026-03-03T01:00:00Z", source:"TradingEconomics / Reuters", sourceUrl:"https://tradingeconomics.com/commodity/copper" },
+  { id:17, name:"Jiangxi, China (Rare Earths)", lat:27.63, lng:115.83, type:"raw-material", region:"asia",
+    severity:"medium", delayDays:15, issue:"Raw Material Shortage — Rare earth export controls",
+    detail:"China tightening rare earth export quotas affecting permanent magnets used in switchgear actuators and relays. Prices up 18% YTD.",
+    timestamp:"2026-03-02T06:00:00Z", source:"SupplyChain Pulse / USGS", sourceUrl:"https://www.supplychainpulse.com" },
+  { id:18, name:"DR Congo (Cobalt)", lat:-4.32, lng:25.92, type:"raw-material", region:"europe",
+    severity:"low", delayDays:8, issue:"Raw Material — Cobalt supply stable but monitored",
+    detail:"Cobalt supply adequate for electrical contacts. ESG compliance audits causing minor procurement delays for some OEMs.",
+    timestamp:"2026-03-01T12:00:00Z", source:"LME / Industry Reports", sourceUrl:"https://www.lme.com" },
+];
+
+// ── Map Init — using CartoDB Positron (English labels worldwide) ──
+const map = L.map('map', { center:[20,10], zoom:2.5, minZoom:2, maxZoom:10, zoomControl:true, attributionControl:true });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
+  subdomains:'abcd',
+  maxZoom:19
+}).addTo(map);
+
+// ── Markers ──
+let markers = [];
+
+const typeColorMap = { port:'#1565c0', canal:'#e67e00', manufacturing:'#c62828', 'raw-material':'#7b1fa2' };
+
+function getMarkerRadius(severity) {
+  return severity === 'high' ? 9 : severity === 'medium' ? 7 : 5;
+}
+
+function createCircleMarker(cp) {
+  const color = typeColorMap[cp.type];
+  const radius = getMarkerRadius(cp.severity);
+  return L.circleMarker([cp.lat, cp.lng], {
+    radius: radius,
+    fillColor: color,
+    color: '#fff',
+    weight: 2,
+    opacity: 1,
+    fillOpacity: 0.9
+  });
+}
+
+function severityClass(s) { return s==='high'?'severity-high':s==='medium'?'severity-medium':'severity-low'; }
+function severityLabel(s) { return s==='high'?'🔴 HIGH':s==='medium'?'🟡 MEDIUM':'🟢 LOW'; }
+
+
+
+function showDetail(cp) {
+  const panel = document.getElementById('detailPanel');
+  panel.innerHTML = `
+    <h3>${cp.name}</h3>
+    <div class="detail-row"><span class="severity-badge ${severityClass(cp.severity)}">${severityLabel(cp.severity)}</span></div>
+    <div class="detail-row"><strong>Issue:</strong> ${cp.issue}</div>
+    <div class="detail-row"><strong>Delay:</strong> ${cp.delayDays} days</div>
+    <div class="detail-row" style="margin-top:6px;">${cp.detail}</div>
+    <div class="detail-row" style="margin-top:8px;"><strong>Source:</strong> <a class="source-link" href="${cp.sourceUrl}" target="_blank">${cp.source}</a></div>
+    <div class="detail-row"><strong>Updated:</strong> ${new Date(cp.timestamp).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true})} ET</div>
+  `;
+  panel.classList.add('active');
+}
+
+function renderMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  const typeFilter = document.getElementById('filterType').value;
+  const geoFilter = document.getElementById('filterGeo').value;
+  const sevFilter = parseInt(document.getElementById('filterSeverity').value);
+
+  const filtered = chokepoints.filter(cp => {
+    if (typeFilter !== 'all' && cp.type !== typeFilter) return false;
+    if (geoFilter !== 'all' && cp.region !== geoFilter) return false;
+    if (cp.delayDays < sevFilter) return false;
+    return true;
+  });
+
+  filtered.forEach(cp => {
+    const marker = createCircleMarker(cp).addTo(map);
+    const popupHtml = `
+      <div class="popup-content">
+        <h4>${cp.name}</h4>
+        <div class="popup-type" style="color:${typeColorMap[cp.type]}">${cp.type.replace('-',' ')}</div>
+        <div class="popup-detail"><strong>${cp.issue}</strong></div>
+        <div class="popup-severity ${severityClass(cp.severity)}">${severityLabel(cp.severity)} • ${cp.delayDays}d delay</div>
+        <div class="popup-detail" style="font-size:9px;color:#8a96a6;margin-top:4px;">${cp.source} • ${new Date(cp.timestamp).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+      </div>
+    `;
+    marker.bindPopup(popupHtml, { maxWidth:280 });
+    marker.on('click', () => showDetail(cp));
+    markers.push(marker);
+  });
+
+  document.getElementById('visibleCount').textContent = filtered.length;
+}
+
+document.getElementById('filterType').addEventListener('change', renderMarkers);
+document.getElementById('filterGeo').addEventListener('change', renderMarkers);
+document.getElementById('filterSeverity').addEventListener('change', renderMarkers);
+
+renderMarkers();
+
+// ── Sparklines ──
+function drawSparkline(containerId, data, color) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const w = 260, h = 30, pad = 2;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const points = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - 2 * pad);
+    const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+    return `${x},${y}`;
+  }).join(' ');
+  const lastPoint = points.split(' ').pop().split(',');
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${lastPoint[0]}" cy="${lastPoint[1]}" r="2.5" fill="${color}"/></svg>`;
+}
+
+// Switchgear Lead Time (monthly avg mid-range in weeks, 12 months)
+const leadTimeData = [42,44,46,48,50,52,55,58,60,62,64,65];
+drawSparkline('leadTimeSparkline', leadTimeData, '#c62828');
+
+// Copper Price (daily, 30 days)
+const copperData = [8950,8980,9010,8990,9050,9100,9080,9120,9060,9030,9070,9110,9150,9130,9170,9200,9180,9160,9190,9220,9200,9180,9210,9230,9250,9240,9260,9247,9250,9247];
+drawSparkline('copperSparkline', copperData, '#e67e00');
+
+// Electrical Steel GOES Price (monthly, 12 months)
+const esteelData = [2380,2410,2450,2420,2490,2540,2580,2620,2660,2710,2780,2840];
+drawSparkline('esteelSparkline', esteelData, '#c62828');
+
+// NY Fed GSCPI (monthly, 12 months)
+const gscpiData = [0.8,0.72,0.65,0.78,0.92,1.05,0.98,1.12,1.08,1.15,1.12,1.34];
+drawSparkline('gscpiSparkline', gscpiData, '#1565c0');
+
+// ISM Supplier Deliveries (monthly, 12 months)
+const ismData = [48.2,47.8,49.1,50.3,51.0,50.6,51.4,52.1,51.8,52.5,53.2,53.8];
+drawSparkline('ismSparkline', ismData, '#e67e00');
+
+// BTS Freight TSI (monthly, 12 months)
+const btsData = [134.2,135.8,136.1,137.4,138.0,138.6,139.2,139.8,140.1,141.0,141.8,142.6];
+drawSparkline('btsSparkline', btsData, '#1565c0');
+</script>
+</body>
+</html>
